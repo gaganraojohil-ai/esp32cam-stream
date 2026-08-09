@@ -12,6 +12,33 @@ const viewers = new Set();
 
 
 // =====================================================
+// SEND COMMAND TO CAMERA
+// =====================================================
+
+function sendToCamera(command) {
+
+    if (
+        camera &&
+        camera.readyState === WebSocket.OPEN
+    ) {
+
+        camera.send(command);
+
+        console.log("📷 → ESP32:", command);
+
+        return true;
+    }
+
+    console.log(
+        "⚠️ Camera not connected. Command not sent:",
+        command
+    );
+
+    return false;
+}
+
+
+// =====================================================
 // CCTV WEBPAGE
 // =====================================================
 
@@ -19,6 +46,7 @@ app.get("/", (req, res) => {
 
     res.send(`
 <!DOCTYPE html>
+
 <html>
 
 <head>
@@ -55,6 +83,7 @@ app.get("/", (req, res) => {
             height: auto;
             display: block;
             margin: auto;
+            background: #111;
         }
 
         .controls {
@@ -129,17 +158,20 @@ function connect() {
 
     ws.onopen = function() {
 
-        status.innerText = "🟢 LIVE";
+        status.innerText = "🟢 CONNECTED - STARTING CAMERA...";
 
     };
 
 
     ws.onmessage = function(event) {
 
+        // Ignore text messages
         if (typeof event.data === "string") {
             return;
         }
 
+
+        // Received JPEG frame
         const url = URL.createObjectURL(event.data);
 
         const old = img.src;
@@ -149,6 +181,8 @@ function connect() {
         if (old.startsWith("blob:")) {
             URL.revokeObjectURL(old);
         }
+
+        status.innerText = "🟢 LIVE";
 
     };
 
@@ -210,6 +244,7 @@ function ledOff() {
 </script>
 
 </body>
+
 </html>
     `);
 
@@ -245,10 +280,28 @@ wss.on("connection", (ws, req) => {
         console.log("📷 ESP32-CAM connected");
 
 
+        // ---------------------------------------------
+        // IMPORTANT:
+        // If someone is already watching, immediately
+        // tell the newly connected ESP32 to start.
+        // ---------------------------------------------
+
+        if (viewers.size > 0) {
+
+            sendToCamera("START_STREAM");
+
+            console.log(
+                "🎥 Viewer already present → START_STREAM"
+            );
+
+        }
+
+
         ws.on("message", (data, isBinary) => {
 
-            // Camera frame
             if (isBinary) {
+
+                // Forward JPEG frame to every viewer
 
                 for (const viewer of viewers) {
 
@@ -297,30 +350,22 @@ wss.on("connection", (ws, req) => {
         );
 
         console.log(
-            "Number of viewers:",
+            "Viewers:",
             viewers.size
         );
 
 
-        // First viewer starts camera
-        if (
-            viewers.size === 1 &&
-            camera &&
-            camera.readyState === WebSocket.OPEN
-        ) {
+        // ---------------------------------------------
+        // ALWAYS send START_STREAM when a viewer
+        // connects.
+        // ---------------------------------------------
 
-            camera.send("START_STREAM");
-
-            console.log(
-                "🎥 START_STREAM sent"
-            );
-
-        }
+        sendToCamera("START_STREAM");
 
 
-        // -------------------------------------------------
+        // ---------------------------------------------
         // PHONE COMMANDS
-        // -------------------------------------------------
+        // ---------------------------------------------
 
         ws.on("message", (message) => {
 
@@ -329,32 +374,20 @@ wss.on("connection", (ws, req) => {
 
 
             if (
-                camera &&
-                camera.readyState === WebSocket.OPEN
+                command === "LED_ON" ||
+                command === "LED_OFF"
             ) {
 
-                if (
-                    command === "LED_ON" ||
-                    command === "LED_OFF"
-                ) {
-
-                    camera.send(command);
-
-                    console.log(
-                        "Command sent:",
-                        command
-                    );
-
-                }
+                sendToCamera(command);
 
             }
 
         });
 
 
-        // -------------------------------------------------
-        // VIEWER CLOSED
-        // -------------------------------------------------
+        // ---------------------------------------------
+        // VIEWER DISCONNECTED
+        // ---------------------------------------------
 
         ws.on("close", () => {
 
@@ -365,23 +398,16 @@ wss.on("connection", (ws, req) => {
             );
 
             console.log(
-                "Number of viewers:",
+                "Viewers:",
                 viewers.size
             );
 
 
             // No viewers = stop camera
-            if (
-                viewers.size === 0 &&
-                camera &&
-                camera.readyState === WebSocket.OPEN
-            ) {
 
-                camera.send("STOP_STREAM");
+            if (viewers.size === 0) {
 
-                console.log(
-                    "🛑 STOP_STREAM sent"
-                );
+                sendToCamera("STOP_STREAM");
 
             }
 
