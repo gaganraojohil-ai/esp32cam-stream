@@ -11,15 +11,14 @@ let camera = null;
 const viewers = new Set();
 
 
-// ===============================
-// CAMERA WEBPAGE
-// ===============================
+// =====================================================
+// CCTV WEBPAGE
+// =====================================================
 
 app.get("/", (req, res) => {
 
     res.send(`
 <!DOCTYPE html>
-
 <html>
 
 <head>
@@ -112,6 +111,11 @@ const status = document.getElementById("status");
 
 let ws;
 
+
+// =====================================================
+// CONNECT
+// =====================================================
+
 function connect() {
 
     ws = new WebSocket(
@@ -151,7 +155,8 @@ function connect() {
 
     ws.onclose = function() {
 
-        status.innerText = "🔴 Disconnected - reconnecting...";
+        status.innerText =
+            "🔴 Disconnected - reconnecting...";
 
         setTimeout(connect, 2000);
 
@@ -160,17 +165,30 @@ function connect() {
 
     ws.onerror = function() {
 
-        status.innerText = "⚠️ Connection error";
+        status.innerText =
+            "⚠️ Connection error";
 
     };
 
 }
 
 
+connect();
+
+
+// =====================================================
+// LED
+// =====================================================
+
 function ledOn() {
 
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (
+        ws &&
+        ws.readyState === WebSocket.OPEN
+    ) {
+
         ws.send("LED_ON");
+
     }
 
 }
@@ -178,44 +196,47 @@ function ledOn() {
 
 function ledOff() {
 
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (
+        ws &&
+        ws.readyState === WebSocket.OPEN
+    ) {
+
         ws.send("LED_OFF");
+
     }
 
 }
 
-
-connect();
-
 </script>
 
 </body>
-
 </html>
     `);
 
 });
 
 
-// ===============================
+// =====================================================
 // HEALTH CHECK
-// ===============================
+// =====================================================
 
 app.get("/healthz", (req, res) => {
+
     res.status(200).send("OK");
+
 });
 
 
-// ===============================
+// =====================================================
 // WEBSOCKET
-// ===============================
+// =====================================================
 
 wss.on("connection", (ws, req) => {
 
 
-    // ===========================
+    // =================================================
     // ESP32-CAM
-    // ===========================
+    // =================================================
 
     if (req.url === "/camera") {
 
@@ -226,13 +247,17 @@ wss.on("connection", (ws, req) => {
 
         ws.on("message", (data, isBinary) => {
 
-            // Forward camera frames to all phones
+            // Camera frame
             if (isBinary) {
 
                 for (const viewer of viewers) {
 
-                    if (viewer.readyState === WebSocket.OPEN) {
+                    if (
+                        viewer.readyState === WebSocket.OPEN
+                    ) {
+
                         viewer.send(data);
+
                     }
 
                 }
@@ -245,8 +270,13 @@ wss.on("connection", (ws, req) => {
         ws.on("close", () => {
 
             if (camera === ws) {
+
                 camera = null;
-                console.log("📷 ESP32-CAM disconnected");
+
+                console.log(
+                    "📷 ESP32-CAM disconnected"
+                );
+
             }
 
         });
@@ -254,26 +284,54 @@ wss.on("connection", (ws, req) => {
     }
 
 
-    // ===========================
+    // =================================================
     // PHONE VIEWER
-    // ===========================
+    // =================================================
 
     else if (req.url === "/viewer") {
 
         viewers.add(ws);
 
-        console.log("📱 Viewer connected");
+        console.log(
+            "📱 Viewer connected"
+        );
+
+        console.log(
+            "Number of viewers:",
+            viewers.size
+        );
 
 
-        // Send LED commands to ESP32
+        // First viewer starts camera
+        if (
+            viewers.size === 1 &&
+            camera &&
+            camera.readyState === WebSocket.OPEN
+        ) {
+
+            camera.send("START_STREAM");
+
+            console.log(
+                "🎥 START_STREAM sent"
+            );
+
+        }
+
+
+        // -------------------------------------------------
+        // PHONE COMMANDS
+        // -------------------------------------------------
+
         ws.on("message", (message) => {
+
+            const command =
+                message.toString();
+
 
             if (
                 camera &&
                 camera.readyState === WebSocket.OPEN
             ) {
-
-                const command = message.toString();
 
                 if (
                     command === "LED_ON" ||
@@ -282,6 +340,11 @@ wss.on("connection", (ws, req) => {
 
                     camera.send(command);
 
+                    console.log(
+                        "Command sent:",
+                        command
+                    );
+
                 }
 
             }
@@ -289,11 +352,38 @@ wss.on("connection", (ws, req) => {
         });
 
 
+        // -------------------------------------------------
+        // VIEWER CLOSED
+        // -------------------------------------------------
+
         ws.on("close", () => {
 
             viewers.delete(ws);
 
-            console.log("📱 Viewer disconnected");
+            console.log(
+                "📱 Viewer disconnected"
+            );
+
+            console.log(
+                "Number of viewers:",
+                viewers.size
+            );
+
+
+            // No viewers = stop camera
+            if (
+                viewers.size === 0 &&
+                camera &&
+                camera.readyState === WebSocket.OPEN
+            ) {
+
+                camera.send("STOP_STREAM");
+
+                console.log(
+                    "🛑 STOP_STREAM sent"
+                );
+
+            }
 
         });
 
@@ -302,12 +392,17 @@ wss.on("connection", (ws, req) => {
 });
 
 
+// =====================================================
+// SERVER
+// =====================================================
+
 const PORT = process.env.PORT || 10000;
 
-server.listen(PORT, () => {
+server.listen(PORT, "0.0.0.0", () => {
 
     console.log(
-        "Gagan❤️(nivyy) CCTV server running on port " + PORT
+        "Gagan❤️(nivyy) CCTV server running on port "
+        + PORT
     );
 
 });
